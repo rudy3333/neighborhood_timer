@@ -5,13 +5,149 @@ from kivy.uix.button import Button
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.textinput import TextInput
 from kivy.uix.spinner import Spinner
+from kivy.uix.image import Image
 from kivy.clock import Clock
 from kivy.uix.screenmanager import ScreenManager, Screen
 import os
+import urllib.request
+import tempfile
+import threading
+import time
+import json
+from datetime import datetime
 
 API_BASE = "https://adventure-time.hackclub.dev/api"
 TOKEN_FILE = "auth_token.txt"
 HACKATIME_KEY_FILE = "hackatime_api_key.txt"
+OFFLINE_HEARTBEATS_DB = "offline_heartbeats.db"
+SYNC_MAX_DEFAULT = 1000
+SEND_LIMIT = 25
+RATE_LIMIT_SECONDS = 120
+
+class OfflineHeartbeatManager:
+    def __init__(self):
+        self.db_path = OFFLINE_HEARTBEATS_DB.replace('.db', '.json')
+        self.last_sync_time = 0
+        self.lock = threading.Lock()
+        self.init_database()
+    
+    def init_database(self):
+        """Initialize the JSON database for offline heartbeats"""
+        try:
+            if not os.path.exists(self.db_path):
+                # Create initial structure mimicking BoltDB
+                data = {
+                    "heartbeats": {}
+                }
+                with open(self.db_path, 'w') as f:
+                    json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"[OFFLINE] Error initializing database: {e}")
+    
+    def _load_data(self):
+        """Load data from JSON file"""
+        try:
+            with open(self.db_path, 'r') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"heartbeats": {}}
+    
+    def _save_data(self, data):
+        """Save data to JSON file"""
+        try:
+            with open(self.db_path, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"[OFFLINE] Error saving data: {e}")
+    
+    def save_heartbeat_offline(self, heartbeat_data):
+        """Save a heartbeat to offline storage using JSON file"""
+        try:
+            with self.lock:
+                data = self._load_data()
+                
+                # Create a unique key based on timestamp and project
+                timestamp = heartbeat_data.get('time', int(time.time()))
+                project = heartbeat_data.get('project', 'unknown')
+                key = f"{timestamp}-{project}"
+                
+                # Store heartbeat data
+                data["heartbeats"][key] = heartbeat_data
+                
+                self._save_data(data)
+                print(f"[OFFLINE] Saved heartbeat to offline storage: {key}")
+                return True
+        except Exception as e:
+            print(f"[OFFLINE] Error saving heartbeat: {e}")
+            return False
+    
+    def get_offline_heartbeats(self, limit=SYNC_MAX_DEFAULT):
+        """Get heartbeats from offline storage"""
+        try:
+            with self.lock:
+                data = self._load_data()
+                heartbeats = []
+                count = 0
+                
+                for key, heartbeat_data in data["heartbeats"].items():
+                    if count >= limit:
+                        break
+                    heartbeats.append((key, heartbeat_data))
+                    count += 1
+                
+                return heartbeats
+        except Exception as e:
+            print(f"[OFFLINE] Error getting offline heartbeats: {e}")
+            return []
+    
+    def remove_heartbeat(self, key):
+        """Remove a heartbeat from offline storage after successful sync"""
+        try:
+            with self.lock:
+                data = self._load_data()
+                if key in data["heartbeats"]:
+                    del data["heartbeats"][key]
+                    self._save_data(data)
+                    print(f"[OFFLINE] Removed heartbeat: {key}")
+        except Exception as e:
+            print(f"[OFFLINE] Error removing heartbeat: {e}")
+    
+    def sync_offline_heartbeats(self, api_key):
+        """Sync offline heartbeats to the API"""
+        current_time = time.time()
+        if current_time - self.last_sync_time < RATE_LIMIT_SECONDS:
+            return  # Rate limiting
+        
+        heartbeats = self.get_offline_heartbeats()
+        if not heartbeats:
+            return
+        
+        print(f"[SYNC] Attempting to sync {len(heartbeats)} offline heartbeats")
+        
+        for key, heartbeat_data in heartbeats:
+            try:
+                # Ensure API key is current
+                heartbeat_data['hackatimeToken'] = api_key
+                
+                response = requests.post(
+                    f"{API_BASE}/heartbeats",
+                    json=heartbeat_data,
+                    headers={"Content-Type": "application/json"},
+                    timeout=10
+                )
+                
+                if response.status_code in (200, 202):
+                    self.remove_heartbeat(key)
+                    print(f"[SYNC] Successfully synced heartbeat {key}")
+                else:
+                    print(f"[SYNC] Failed to sync heartbeat {key}: {response.status_code}")
+                
+                time.sleep(0.1)  # Small delay between requests
+                
+            except Exception as e:
+                print(f"[SYNC] Error syncing heartbeat {key}: {e}")
+        
+        self.last_sync_time = current_time
 
 class LoginScreen(Screen):
     def __init__(self, **kwargs):
@@ -103,7 +239,19 @@ class MainScreen(Screen):
         super().__init__(**kwargs)
         self.slack_id = None
         self.apps_data = {}
+        self.offline_manager = OfflineHeartbeatManager()
         self.layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        
+        # Profile picture section
+        self.profile_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=80)
+        self.profile_picture = Image(size_hint=(None, None), size=(60, 60), pos_hint={'center_x': 0.5, 'center_y': 0.5})
+        self.profile_layout.add_widget(self.profile_picture)
+        self.layout.add_widget(self.profile_layout)
+        
+        # Welcome message
+        self.welcome_label = Label(text="Welcome!", font_size=24, size_hint_y=None, height=40)
+        self.layout.add_widget(self.welcome_label)
+        
         saved_api_key = ""
         if os.path.exists(HACKATIME_KEY_FILE):
             with open(HACKATIME_KEY_FILE, "r") as f:
@@ -130,6 +278,11 @@ class MainScreen(Screen):
         self.layout.add_widget(self.test_heartbeat_button)
         self.heartbeat_status_label = Label(text="", color=(0,1,0,1))
         self.layout.add_widget(self.heartbeat_status_label)
+        
+        # Offline status label
+        self.offline_status_label = Label(text="", color=(1,0.5,0,1), size_hint_y=None, height=30)
+        self.layout.add_widget(self.offline_status_label)
+        
         self.logout_button = Button(text="Logout")
         self.logout_button.bind(on_press=self.logout)
         self.layout.add_widget(self.logout_button)
@@ -137,10 +290,31 @@ class MainScreen(Screen):
         self.seconds = 0
         self.timer_event = None
         self.heartbeat_event = None
+        self.sync_event = None
         self.add_widget(self.layout)
 
-    def set_slack_id(self, slack_id):
+    def set_slack_id(self, slack_id, profile_picture_url=None, full_name=None):
         self.slack_id = slack_id
+        print(f"Setting slack_id: {slack_id}, full_name: {full_name}")
+        if profile_picture_url:
+            try:
+                # Download the profile picture to a temporary file
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+                urllib.request.urlretrieve(profile_picture_url, temp_file.name)
+                self.profile_picture.source = temp_file.name
+                # Store the temp file name to clean it up later
+                self.profile_temp_file = temp_file.name
+            except Exception as e:
+                print(f"Error loading profile picture: {e}")
+        
+        # Update welcome message with full name
+        if full_name:
+            self.welcome_label.text = f"Welcome, {full_name}!"
+            print(f"Updated welcome message to: Welcome, {full_name}!")
+        else:
+            self.welcome_label.text = "Welcome!"
+            print("Updated welcome message to: Welcome!")
+            
         self.fetch_apps()
 
     def fetch_apps(self):
@@ -214,6 +388,8 @@ class MainScreen(Screen):
         self.timer_label.text = "00:00:00"
         self.timer_event = Clock.schedule_interval(self.update_timer, 1)
         self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 4)
+        # Start offline sync every 30 seconds
+        self.sync_event = Clock.schedule_interval(self.sync_offline_heartbeats, 30)
 
     def stop_logging(self):
         self.is_logging = False
@@ -224,6 +400,9 @@ class MainScreen(Screen):
         if hasattr(self, 'heartbeat_event') and self.heartbeat_event:
             self.heartbeat_event.cancel()
             self.heartbeat_event = None
+        if hasattr(self, 'sync_event') and self.sync_event:
+            self.sync_event.cancel()
+            self.sync_event = None
 
     def update_timer(self, dt):
         self.seconds += 1
@@ -298,15 +477,43 @@ class MainScreen(Screen):
             response = requests.post(
                 f"{API_BASE}/heartbeats",
                 json=payload,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": "application/json"},
+                timeout=10
             )
             print(f"[TIMER] Heartbeat response: {response.status_code} {response.text}")
+            
+            if response.status_code in (200, 202):
+                self.offline_status_label.text = ""
+            else:
+                # Save to offline storage if API call fails
+                self.offline_manager.save_heartbeat_offline(payload)
+                self.offline_status_label.text = f"Offline: {response.status_code}"
+                
         except Exception as e:
             print("[TIMER] Error sending heartbeat:", e)
+            # Save to offline storage if network error
+            self.offline_manager.save_heartbeat_offline(payload)
+            self.offline_status_label.text = "Offline: Network Error"
+
+    def sync_offline_heartbeats(self, dt):
+        """Sync offline heartbeats to the API"""
+        api_key = self.api_key_input.text.strip()
+        if api_key:
+            # Run sync in a separate thread to avoid blocking UI
+            def sync_thread():
+                self.offline_manager.sync_offline_heartbeats(api_key)
+            
+            threading.Thread(target=sync_thread, daemon=True).start()
 
     def logout(self, instance):
         if os.path.exists(TOKEN_FILE):
             os.remove(TOKEN_FILE)
+        # Clean up temporary profile picture file
+        if hasattr(self, 'profile_temp_file') and os.path.exists(self.profile_temp_file):
+            try:
+                os.remove(self.profile_temp_file)
+            except:
+                pass
         self.manager.current = "login"
 
     def on_api_key_change(self, instance, value):
@@ -341,10 +548,40 @@ class TimeLoggerApp(App):
             slack_id = data.get("slackId")
             if isinstance(slack_id, list):
                 slack_id = slack_id[0] if slack_id else None
+            
+            # Extract profile picture URL
+            profile_picture_url = None
+            pfp_data = data.get("pfp", [])
+            if pfp_data and len(pfp_data) > 0:
+                profile_picture_url = pfp_data[0].get("url")
+            
             if slack_id:
-                self.main_screen.set_slack_id(slack_id)
+                # Fetch neighbor details to get full name
+                self.fetch_neighbor_details(slack_id, profile_picture_url)
         except Exception as e:
             pass
+
+    def fetch_neighbor_details(self, slack_id, profile_picture_url):
+        try:
+            print(f"Fetching neighbor details for slack_id: {slack_id}")
+            response = requests.get(
+                f"{API_BASE}/getNeighborDetails?slackId={slack_id}",
+                headers={"Accept": "application/json"}
+            )
+            print(f"Neighbor details response status: {response.status_code}")
+            data = response.json()
+            print(f"Neighbor details response data: {data}")
+            
+            # Extract full_name from the nested neighbor object
+            neighbor_data = data.get("neighbor", {})
+            full_name = neighbor_data.get("fullName")
+            print(f"Extracted full_name: {full_name}")
+            
+            self.main_screen.set_slack_id(slack_id, profile_picture_url, full_name)
+        except Exception as e:
+            print(f"Error fetching neighbor details: {e}")
+            # Fallback to setting without full name
+            self.main_screen.set_slack_id(slack_id, profile_picture_url)
 
 if __name__ == "__main__":
     TimeLoggerApp().run()
