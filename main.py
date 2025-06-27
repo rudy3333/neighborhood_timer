@@ -213,7 +213,7 @@ class MainScreen(Screen):
         self.seconds = 0
         self.timer_label.text = "00:00:00"
         self.timer_event = Clock.schedule_interval(self.update_timer, 1)
-        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 5)
+        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 4)
 
     def stop_logging(self):
         self.is_logging = False
