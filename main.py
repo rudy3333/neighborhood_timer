@@ -31,6 +31,9 @@ class LoginScreen(Screen):
         self.verify_button = Button(text="Verify", opacity=0, disabled=True)
         self.verify_button.bind(on_press=self.handle_verify_otp)
         self.layout.add_widget(self.verify_button)
+        self.resend_button = Button(text="Resend OTP", opacity=0, disabled=True)
+        self.resend_button.bind(on_press=self.handle_resend_otp)
+        self.layout.add_widget(self.resend_button)
         self.add_widget(self.layout)
 
     def handle_send_otp(self, instance):
@@ -54,6 +57,8 @@ class LoginScreen(Screen):
                 self.verify_button.disabled = False
                 self.send_button.disabled = True
                 self.email_input.disabled = True
+                self.resend_button.opacity = 1
+                self.resend_button.disabled = False
             else:
                 self.error_label.text = data.get("message", "An error occurred.")
         except Exception as e:
@@ -87,6 +92,11 @@ class LoginScreen(Screen):
                 self.error_label.text = data.get("message", "Invalid OTP.")
         except Exception as e:
             self.error_label.text = "Failed to verify OTP."
+
+    def handle_resend_otp(self, instance):
+        self.resend_button.disabled = True
+        self.handle_send_otp(instance)
+        Clock.schedule_once(lambda dt: setattr(self.resend_button, 'disabled', False), 30)  # 30 seconds cooldown
 
 class MainScreen(Screen):
     def __init__(self, **kwargs):
