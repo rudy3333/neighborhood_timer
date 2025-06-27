@@ -1,3 +1,5 @@
+![Neighborhood Timer Badge](https://images.fillout.com/orgid-81/flowpublicid-2d6RsxRU3ius/widgetid-gHXJ/wLL8YM3u5TEHNwmmey7cHo/summer25.png?a=4hit9PajYRUKJJYwW78gvU)
+
 # Neighborhood Timer
 
 Neighborhood Timer is a desktop application built with Kivy for logging and tracking project time, designed to integrate with the Hack Club's Adventure Time API and Hackatime. It allows users to authenticate via email OTP, select apps and projects, and log their work time.
