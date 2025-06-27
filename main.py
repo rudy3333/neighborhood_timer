@@ -11,6 +11,7 @@ import os
 
 API_BASE = "https://adventure-time.hackclub.dev/api"
 TOKEN_FILE = "auth_token.txt"
+HACKATIME_KEY_FILE = "hackatime_api_key.txt"
 
 class LoginScreen(Screen):
     def __init__(self, **kwargs):
@@ -93,7 +94,12 @@ class MainScreen(Screen):
         self.slack_id = None
         self.apps_data = {}
         self.layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        self.api_key_input = TextInput(hint_text="Hackatime API Key", multiline=False)
+        saved_api_key = ""
+        if os.path.exists(HACKATIME_KEY_FILE):
+            with open(HACKATIME_KEY_FILE, "r") as f:
+                saved_api_key = f.read().strip()
+        self.api_key_input = TextInput(hint_text="Hackatime API Key", multiline=False, text=saved_api_key)
+        self.api_key_input.bind(text=self.on_api_key_change)
         self.layout.add_widget(self.api_key_input)
         self.language_input = TextInput(hint_text="Language (e.g. JavaScript)", multiline=False)
         self.layout.add_widget(self.language_input)
@@ -112,6 +118,8 @@ class MainScreen(Screen):
         self.test_heartbeat_button = Button(text="Test Heartbeat")
         self.test_heartbeat_button.bind(on_press=self.test_heartbeat)
         self.layout.add_widget(self.test_heartbeat_button)
+        self.heartbeat_status_label = Label(text="", color=(0,1,0,1))
+        self.layout.add_widget(self.heartbeat_status_label)
         self.logout_button = Button(text="Logout")
         self.logout_button.bind(on_press=self.logout)
         self.layout.add_widget(self.logout_button)
@@ -195,8 +203,7 @@ class MainScreen(Screen):
         self.seconds = 0
         self.timer_label.text = "00:00:00"
         self.timer_event = Clock.schedule_interval(self.update_timer, 1)
-        # Start heartbeat interval
-        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 2)
+        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 5)
 
     def stop_logging(self):
         self.is_logging = False
@@ -220,9 +227,13 @@ class MainScreen(Screen):
         api_key = self.api_key_input.text.strip()
         language = self.language_input.text.strip() or 'JavaScript'
         if not project or project == 'Select a project':
+            self.heartbeat_status_label.text = "No project selected."
+            self.heartbeat_status_label.color = (1,0,0,1)
             print("No project selected.")
             return
         if not api_key:
+            self.heartbeat_status_label.text = "No API key entered."
+            self.heartbeat_status_label.color = (1,0,0,1)
             print("No API key entered.")
             return
         payload = {
@@ -241,7 +252,15 @@ class MainScreen(Screen):
                 headers={"Content-Type": "application/json"}
             )
             print("Heartbeat response:", response.status_code, response.text)
+            if response.status_code in (200, 202):
+                self.heartbeat_status_label.text = "Heartbeat OK!"
+                self.heartbeat_status_label.color = (0,1,0,1)
+            else:
+                self.heartbeat_status_label.text = f"Heartbeat failed: {response.status_code}"
+                self.heartbeat_status_label.color = (1,0,0,1)
         except Exception as e:
+            self.heartbeat_status_label.text = "Error sending heartbeat."
+            self.heartbeat_status_label.color = (1,0,0,1)
             print("Error sending heartbeat:", e)
 
     def send_heartbeat(self, dt):
@@ -279,6 +298,10 @@ class MainScreen(Screen):
         if os.path.exists(TOKEN_FILE):
             os.remove(TOKEN_FILE)
         self.manager.current = "login"
+
+    def on_api_key_change(self, instance, value):
+        with open(HACKATIME_KEY_FILE, "w") as f:
+            f.write(value.strip())
 
 class TimeLoggerApp(App):
     def build(self):

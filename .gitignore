@@ -1,2 +1,7 @@
 venv
 auth_token.txt
+build
+dist
+.cache
+kivy-venv
+hackatime_api_key.txt
