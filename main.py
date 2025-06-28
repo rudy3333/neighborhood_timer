@@ -16,6 +16,8 @@ import time
 import json
 from datetime import datetime
 import mimetypes
+from kivy.uix.popup import Popup
+from kivy.uix.scrollview import ScrollView
 
 API_BASE = "https://adventure-time.hackclub.dev/api"
 TOKEN_FILE = "auth_token.txt"
@@ -283,6 +285,10 @@ class MainScreen(Screen):
         # Offline status label
         self.offline_status_label = Label(text="", color=(1,0.5,0,1), size_hint_y=None, height=30)
         self.layout.add_widget(self.offline_status_label)
+
+        self.view_unsynced_button = Button(text="View Unsynced Heartbeats")
+        self.view_unsynced_button.bind(on_press=self.show_unsynced_heartbeats)
+        self.layout.add_widget(self.view_unsynced_button)
         
         self.logout_button = Button(text="Logout")
         self.logout_button.bind(on_press=self.logout)
@@ -395,8 +401,8 @@ class MainScreen(Screen):
         self.seconds = 0
         self.timer_label.text = "00:00:00"
         self.timer_event = Clock.schedule_interval(self.update_timer, 1)
-        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 25)
-        self.sync_event = Clock.schedule_interval(self.sync_offline_heartbeats, 30)
+        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 40)
+        # self.sync_event = Clock.schedule_interval(self.sync_offline_heartbeats, 30)
 
     def stop_logging(self):
         self.is_logging = False
@@ -502,16 +508,6 @@ class MainScreen(Screen):
             self.offline_manager.save_heartbeat_offline(payload)
             self.offline_status_label.text = "Offline: Network Error"
 
-    def sync_offline_heartbeats(self, dt):
-        """Sync offline heartbeats to the API"""
-        api_key = self.api_key_input.text.strip()
-        if api_key:
-            # Run sync in a separate thread to avoid blocking UI
-            def sync_thread():
-                self.offline_manager.sync_offline_heartbeats(api_key)
-            
-            threading.Thread(target=sync_thread, daemon=True).start()
-
     def logout(self, instance):
         if os.path.exists(TOKEN_FILE):
             os.remove(TOKEN_FILE)
@@ -526,6 +522,50 @@ class MainScreen(Screen):
     def on_api_key_change(self, instance, value):
         with open(HACKATIME_KEY_FILE, "w") as f:
             f.write(value.strip())
+
+    def show_unsynced_heartbeats(self, instance):
+        heartbeats = self.offline_manager.get_offline_heartbeats()
+        content = BoxLayout(orientation='vertical', spacing=5)
+        scroll = ScrollView(size_hint=(1, 0.8))
+        inner = BoxLayout(orientation='vertical', size_hint_y=None)
+        inner.bind(minimum_height=inner.setter('height'))
+        if not heartbeats:
+            inner.add_widget(Label(text="No unsynced heartbeats!", size_hint_y=None, height=30))
+        else:
+            for key, hb in heartbeats:
+                desc = f"{hb.get('project', 'unknown')} @ {datetime.fromtimestamp(hb.get('time', 0)).strftime('%Y-%m-%d %H:%M:%S')}"
+                row = BoxLayout(orientation='horizontal', size_hint_y=None, height=30)
+                row.add_widget(Label(text=desc))
+                del_btn = Button(text="Delete", size_hint_x=None, width=80)
+                del_btn.bind(on_press=lambda btn, k=key: self.delete_unsynced_heartbeat(k))
+                row.add_widget(del_btn)
+                inner.add_widget(row)
+        scroll.add_widget(inner)
+        content.add_widget(scroll)
+        if heartbeats:
+            del_all_btn = Button(text="Delete All Unsynced Heartbeats", size_hint_y=None, height=40)
+            del_all_btn.bind(on_press=lambda btn: self.delete_all_unsynced_heartbeats())
+            content.add_widget(del_all_btn)
+        close_btn = Button(text="Close", size_hint_y=None, height=40)
+        content.add_widget(close_btn)
+        popup = Popup(title="Unsynced Heartbeats", content=content, size_hint=(0.9, 0.7))
+        close_btn.bind(on_press=popup.dismiss)
+        self._unsynced_popup = popup
+        popup.open()
+
+    def delete_unsynced_heartbeat(self, key):
+        self.offline_manager.remove_heartbeat(key)
+        if hasattr(self, '_unsynced_popup'):
+            self._unsynced_popup.dismiss()
+        self.show_unsynced_heartbeats(None)
+
+    def delete_all_unsynced_heartbeats(self):
+        heartbeats = self.offline_manager.get_offline_heartbeats()
+        for key, _ in heartbeats:
+            self.offline_manager.remove_heartbeat(key)
+        if hasattr(self, '_unsynced_popup'):
+            self._unsynced_popup.dismiss()
+        self.show_unsynced_heartbeats(None)
 
 class TimeLoggerApp(App):
     def build(self):
