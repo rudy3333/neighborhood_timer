@@ -15,6 +15,7 @@ import threading
 import time
 import json
 from datetime import datetime
+import mimetypes
 
 API_BASE = "https://adventure-time.hackclub.dev/api"
 TOKEN_FILE = "auth_token.txt"
@@ -298,12 +299,19 @@ class MainScreen(Screen):
         print(f"Setting slack_id: {slack_id}, full_name: {full_name}")
         if profile_picture_url:
             try:
-                # Download the profile picture to a temporary file
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-                urllib.request.urlretrieve(profile_picture_url, temp_file.name)
-                self.profile_picture.source = temp_file.name
-                # Store the temp file name to clean it up later
-                self.profile_temp_file = temp_file.name
+                # Download the image with requests
+                response = requests.get(profile_picture_url, stream=True)
+                if response.status_code == 200:
+                    content_type = response.headers.get('content-type')
+                    ext = mimetypes.guess_extension(content_type) or '.png'
+                    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+                    for chunk in response.iter_content(1024):
+                        temp_file.write(chunk)
+                    temp_file.close()
+                    self.profile_picture.source = temp_file.name
+                    self.profile_temp_file = temp_file.name
+                else:
+                    print(f"Failed to download profile picture: {response.status_code}")
             except Exception as e:
                 print(f"Error loading profile picture: {e}")
         
@@ -387,8 +395,7 @@ class MainScreen(Screen):
         self.seconds = 0
         self.timer_label.text = "00:00:00"
         self.timer_event = Clock.schedule_interval(self.update_timer, 1)
-        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 4)
-        # Start offline sync every 30 seconds
+        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 25)
         self.sync_event = Clock.schedule_interval(self.sync_offline_heartbeats, 30)
 
     def stop_logging(self):
@@ -572,15 +579,16 @@ class TimeLoggerApp(App):
             data = response.json()
             print(f"Neighbor details response data: {data}")
             
-            # Extract full_name from the nested neighbor object
+            # Extract full_name and pfp from the nested neighbor object
             neighbor_data = data.get("neighbor", {})
             full_name = neighbor_data.get("fullName")
-            print(f"Extracted full_name: {full_name}")
+            profile_picture_url = neighbor_data.get("pfp")  # Get pfp from neighbor
+            print(f"Extracted full_name: {full_name}, pfp: {profile_picture_url}")
             
             self.main_screen.set_slack_id(slack_id, profile_picture_url, full_name)
         except Exception as e:
             print(f"Error fetching neighbor details: {e}")
-            # Fallback to setting without full name
+            # Fallback to setting without full name or pfp
             self.main_screen.set_slack_id(slack_id, profile_picture_url)
 
 if __name__ == "__main__":
