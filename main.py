@@ -401,7 +401,7 @@ class MainScreen(Screen):
         self.seconds = 0
         self.timer_label.text = "00:00:00"
         self.timer_event = Clock.schedule_interval(self.update_timer, 1)
-        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 60)
+        self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 10)
         # self.sync_event = Clock.schedule_interval(self.sync_offline_heartbeats, 30)
 
     def stop_logging(self):
@@ -567,7 +567,10 @@ class MainScreen(Screen):
             self._unsynced_popup.dismiss()
         self.show_unsynced_heartbeats(None)
 
-class TimeLoggerApp(App):
+class HackatimeTimerApp(App):
+    def get_application_name(self):
+        return "hackatime timer"
+    
     def build(self):
         self.sm = ScreenManager()
         self.login_screen = LoginScreen(name="login")
@@ -632,4 +635,4 @@ class TimeLoggerApp(App):
             self.main_screen.set_slack_id(slack_id, profile_picture_url)
 
 if __name__ == "__main__":
-    TimeLoggerApp().run()
+    HackatimeTimerApp().run()

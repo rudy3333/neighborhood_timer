@@ -7,3 +7,6 @@ kivy-venv
 hackatime_api_key.txt
 .DS_store
 offline_heartbeats.json
+buildozer.spec
+bin
+.buildozer
