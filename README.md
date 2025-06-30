@@ -7,7 +7,15 @@ Neighborhood Timer is a desktop application built with Kivy for logging and trac
 
 ## Installation
 
-### Running the app
+You can use Neighborhood Timer in two ways:
+
+### 1. Using the Pre-built Release (Recommended)
+- Download the latest release from the [Releases page](https://github.com/yourusername/neighborhood_timer/releases).
+- Extract the downloaded file and run the executable for your platform (e.g., `NeighborhoodTimer.exe` on Windows).
+- No installation or Python required!
+
+### 2. Running from Source
+If you prefer to run the app from source or want to contribute:
 
 ```bash
 pip install -r requirements.txt
