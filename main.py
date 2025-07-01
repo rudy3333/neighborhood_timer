@@ -273,6 +273,12 @@ class MainScreen(Screen):
         self.layout.add_widget(self.unlogged_label)
         self.timer_label = Label(text="00:00:00", font_size=48)
         self.layout.add_widget(self.timer_label)
+        
+        self.timer_input = TextInput(hint_text="Set timer (minutes, optional)", multiline=False, input_filter='int')
+        self.layout.add_widget(self.timer_input)
+        self.timer_set_label = Label(text="", color=(0,0,1,1))
+        self.layout.add_widget(self.timer_set_label)
+        
         self.start_stop_button = Button(text="Start Logging")
         self.start_stop_button.bind(on_press=self.toggle_logging)
         self.layout.add_widget(self.start_stop_button)
@@ -298,6 +304,7 @@ class MainScreen(Screen):
         self.timer_event = None
         self.heartbeat_event = None
         self.sync_event = None
+        self.timer_limit_seconds = None
         self.add_widget(self.layout)
 
     def set_slack_id(self, slack_id, profile_picture_url=None, full_name=None):
@@ -400,6 +407,13 @@ class MainScreen(Screen):
         self.start_stop_button.text = "Stop Logging"
         self.seconds = 0
         self.timer_label.text = "00:00:00"
+        timer_text = self.timer_input.text.strip()
+        if timer_text.isdigit() and int(timer_text) > 0:
+            self.timer_limit_seconds = int(timer_text) * 60
+            self.timer_set_label.text = f"Timer set for {timer_text} minutes."
+        else:
+            self.timer_limit_seconds = None
+            self.timer_set_label.text = ""
         self.timer_event = Clock.schedule_interval(self.update_timer, 1)
         self.heartbeat_event = Clock.schedule_interval(self.send_heartbeat, 10)
         # self.sync_event = Clock.schedule_interval(self.sync_offline_heartbeats, 30)
@@ -416,6 +430,8 @@ class MainScreen(Screen):
         if hasattr(self, 'sync_event') and self.sync_event:
             self.sync_event.cancel()
             self.sync_event = None
+        self.timer_limit_seconds = None
+        self.timer_set_label.text = ""
 
     def update_timer(self, dt):
         self.seconds += 1
@@ -423,6 +439,9 @@ class MainScreen(Screen):
         minutes = (self.seconds % 3600) // 60
         secs = self.seconds % 60
         self.timer_label.text = f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        if self.timer_limit_seconds is not None and self.seconds >= self.timer_limit_seconds:
+            self.timer_set_label.text = "Timer reached! Stopping logging."
+            self.stop_logging()
 
     def test_heartbeat(self, instance):
         project = self.project_spinner.text
